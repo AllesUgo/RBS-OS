@@ -1,0 +1,19 @@
+[bits 32]
+dd end
+SECTION a vstart=0
+MOV EBP,ESP
+SUB ESP,4
+RE:
+MOV EDI,0
+MOV EBX,S 
+INT 0x66
+MOV EBX,1000
+MOV EDI,3
+INT 0x66
+JMP RE 
+EXIT:
+MOV EDI,2
+INT 0x66
+S db 'Running',0DH,0AH,0
+SECTION b
+end:
