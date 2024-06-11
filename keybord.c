@@ -81,3 +81,9 @@ int MapScanCodeToChar(unsigned char scan_code)
     else
         return chars_lower[scan_code];
 }
+
+int KB_GetKeyStatus(unsigned int scan_code)
+{
+    if (scan_code>255) return 0;
+    return KEY_STATE_MAP[scan_code];
+}

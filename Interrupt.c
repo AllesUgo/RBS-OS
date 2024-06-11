@@ -67,12 +67,44 @@ void __cdecl deal_soft_interrupt(unsigned int num, unsigned int b, unsigned int 
     case 4:
         *((unsigned int *)b) = WaitForKeyboardInput();
         break;
+    case 5:
+        *((unsigned int *)c) = KB_GetKeyStatus(b);
+        break;
+    case 6:
+    {
+        struct TASK_INFO_BLOCK *info = GetNowTaskInfoPtr();
+        if (((struct TASK_EXTRA_INFO *)info->extra_info)->session)
+        {
+            LoadTask(b,3,((struct TASK_EXTRA_INFO *)info->extra_info)->session);
+        }
+    }
+    break;
+    case 7:
+    {
+        struct TASK_INFO_BLOCK *info = GetNowTaskInfoPtr();
+        if (((struct TASK_EXTRA_INFO *)info->extra_info)->session)
+        {
+            short int x,y;
+            Session_GetCursor(((struct TASK_EXTRA_INFO *)info->extra_info)->session,&x,&y);
+            *(int*)b = x;
+            *(int*)c = y;
+        }
+    }
+    break;
+    case 8:
+    {
+        struct TASK_INFO_BLOCK *info = GetNowTaskInfoPtr();
+        if (((struct TASK_EXTRA_INFO *)info->extra_info)->session)
+        {
+            Session_SetCursor(((struct TASK_EXTRA_INFO *)info->extra_info)->session,b,c);
+        }
+    }
+    break;
     default:
         Puts("Unknown soft interrupt:");
         PrintHex(num);
         CloseInterrupt();
         WaitForInterrupt();
-
         break;
     }
 }
@@ -159,9 +191,12 @@ __attribute__((interrupt)) void int12(struct interrupt_frame *frame, unsigned in
 }
 __attribute__((interrupt)) void int13(struct interrupt_frame *frame, unsigned int error_code)
 {
-    Puts("Interrupt: 0x0D\r\n");
+    Puts("GP Exception\r\nAt: ");
     PrintHex(frame->eip);
-    WaitForInterrupt();
+    Puts("Press any key to continue with close now process...\r\n");
+    SetEFLAGS(frame->eflags);
+    WaitForKeyboardInput();
+    CloseNowTask();
 }
 
 __attribute__((interrupt)) void int14(struct interrupt_frame *frame, unsigned int error_code)
@@ -179,9 +214,7 @@ __attribute__((interrupt)) void int14(struct interrupt_frame *frame, unsigned in
     Strcat(str, UIntToHex(lineraddr, temp));
     Strcat(str, "\r\n");
     Puts(str);
-    CloseInterrupt();
-    WaitForInterrupt();
-    Puts("Press any key to continue...\r\n");
+    Puts("Press any key to continue with close now process...\r\n");
     SetEFLAGS(frame->eflags);
     WaitForKeyboardInput();
     CloseNowTask();

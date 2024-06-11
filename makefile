@@ -1,5 +1,5 @@
 
-CC=rbscc
+CC=rbscc -O3
 
 a.bin: base_io.o c_basic.o Interrupt.o kernel.o keybord.o memory.o screen_ctrl.o session.o task.o time.o 
 	$(CC) base_io.o c_basic.o Interrupt.o kernel.o keybord.o memory.o screen_ctrl.o session.o task.o time.o

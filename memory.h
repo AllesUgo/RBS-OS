@@ -7,14 +7,18 @@ void InitKernelAllIndexTable(void);
 unsigned int AllocatePhyPage(void);
 void FreePhyPage(unsigned int page);
 int AllocatePage(unsigned int alloc_addr, unsigned int attribute);
+int AllocatePageInOtherProcress(unsigned int alloc_addr,unsigned int attribute,unsigned int target_cr3);
+void ResetTargetIndexTableItem(unsigned int cr3,unsigned int which) __attribute__((optimize("O0")));;
+void ResetKernelUserSpace(void);
 
 void FreePage(unsigned int page);
 
 void *kmalloc(unsigned int size);
+void* malloc(unsigned int size);
 
 void kfree(void *ptr);
 
-unsigned int CopyPageIndexTable(void);
+unsigned int CopyPageIndexTable(int is_clear_user_space);
 
 void AsyncKernelPageIndexTable(unsigned int target_index_table_phy_addr);
 

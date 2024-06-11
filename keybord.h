@@ -35,4 +35,5 @@ void EnableKeybordInterrupt();
 void KB_DealKeyDown(unsigned char scan_code);
 void KB_DealKeyUp(unsigned char scan_code);
 int MapScanCodeToChar(unsigned char scan_code);
+int KB_GetKeyStatus(unsigned int scan_code);
 

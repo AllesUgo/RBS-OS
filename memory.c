@@ -153,6 +153,123 @@ int AllocatePage(unsigned int alloc_addr, unsigned int attribute)
     return 0; // 分配成功
 }
 
+int AllocatePageInOtherProcress(unsigned int alloc_addr,unsigned int attribute,unsigned int target_cr3)
+{
+    DisableSwitchTask();
+    unsigned int eflags = GetEFLAGS();
+    CloseInterrupt();
+    RecoverSwitchTask();
+    //先将目标cr3载入当前cr3的倒数第二项
+    unsigned int temp = 0xFFFFF000 + 1022 * 4; // 指向当前页目录到数第二项
+    *(unsigned int *)temp = target_cr3 | 0x03;
+    asm volatile(
+        "invlpg (0xFFFFFFF8)\n\t"
+        :
+        :); // 刷新页目录表里该条目
+    /*
+    {
+        char temp[] = "allocate";
+        Puts(temp);
+        PrintHex(alloc_addr);
+    }
+    */
+    // 先检查要申请的内存在页目录表中是否存在
+    temp = alloc_addr >> 22;
+    temp <<= 2;
+    temp |= 0xFFFFE000;
+
+    // PrintHex(temp);
+
+    if (((*(unsigned int *)temp) & 1) == 0)
+    {
+        /*
+        {
+            char str[] = "Not found in page index table\r\n";
+            Puts(str);
+        }
+        */
+        // 不在内存中
+        unsigned int page_table = AllocatePhyPage(); // 申请物理页
+        if (page_table == 0xFFFFFFFF)
+        {
+            SetEFLAGS(eflags);
+            return -1; // 申请物理页失败
+        }
+        if (alloc_addr >= 0x80000000)
+            *(unsigned int *)temp = page_table | 0x03;//内核页目录权限限制
+        else
+            *(unsigned int *)temp = page_table | 0x07; // 在页目录中注册该页表
+        temp = alloc_addr & 0xFFC00000;
+        temp >>= 10;
+        temp |= 0xFF800000;
+        // 将页表清空
+        for (int i = 0; i < 1024; ++i)
+            *((unsigned int *)temp + i) = 0;
+        // 在最后一项填写自身地址
+        //*((unsigned int *)temp + 1023) = (page_table & 0xFFFFF000) | 0x03;
+    }
+    // 检查页是否在页表中
+    temp = 0xFF800000;
+    temp |= (alloc_addr >> 12) << 2;
+    // PrintHex(temp);
+    if (((*(unsigned int *)temp) & 1) == 0)
+    {
+        /*
+        {
+            char str[] = "Not found in page table\r\n";
+            Puts(str);
+        }
+        */
+        // 页表中没有该物理页
+        unsigned int page = AllocatePhyPage();
+        if (page == 0xFFFFFFFF)
+        {
+            SetEFLAGS(eflags);
+            return -1; // 申请物理页失败
+        }
+        *(unsigned int *)temp = page | attribute; // 普通页无需初始化
+    }
+    //将当前页目录倒数第二项清空
+    temp = 0xFFFFF000 + 1022 * 4; // 指向当前页目录到数第二项
+    *(unsigned int *)temp = 0;
+    asm volatile(
+        "invlpg (0xFFFFFFF8)\n\t"
+        :
+        :);
+    /*
+    {
+        char str[] = "allocate finish\r\n";
+        Puts(str);
+    }
+    */
+    SetEFLAGS(eflags);
+    return 0; // 分配成功
+}
+/*本函数未考虑中断，请事先关闭中断*/
+void ResetTargetIndexTableItem(unsigned int cr3,unsigned int which)
+{
+    DisableSwitchTask();
+    unsigned int eflags = GetEFLAGS();
+    CloseInterrupt();
+    RecoverSwitchTask();
+    //先将目标cr3载入当前cr3的倒数第二项
+    unsigned int temp = 0xFFFFF000 + 1022 * 4; // 指向当前页目录到数第二项
+    *(unsigned int *)temp = cr3 | 0x03;
+    asm volatile(
+        "invlpg (0xFFFFFFF8)\n\t"
+        :
+        :); // 刷新页目录表里该条目
+    temp = 0xFFFFE000+(which<<2);
+    *(int*)temp = 0;
+     //将当前页目录倒数第二项清空
+    temp = 0xFFFFF000 + 1022 * 4; // 指向当前页目录到数第二项
+    *(unsigned int *)temp = 0;
+    asm volatile(
+        "invlpg (0xFFFFFFF8)\n\t"
+        :
+        :);
+}
+
 void FreePage(unsigned int page)
 {
     page = page >> 12 << 12;
@@ -184,6 +301,20 @@ void FreePage(unsigned int page)
 }
 void *kmalloc(unsigned int size)
 {
+    static unsigned int next_allocate = 0x80202000;
+    unsigned int ret = next_allocate;
+    unsigned int page_num = PALIGN_UP(size, 0x1000) / 0x1000;
+
+    while (page_num--)
+    {
+        AllocatePage(next_allocate, 0x03);
+        next_allocate += 0x1000;
+    }
+    return (void *)ret;
+}
+
+void *malloc(unsigned int size)
+{
     struct TASK_INFO_BLOCK *tb = GetNowTaskInfoPtr();
     unsigned int ret = tb->next_allocate;
     unsigned int page_num = PALIGN_UP(size, 0x1000) / 0x1000;
@@ -200,7 +331,7 @@ void kfree(void *ptr)
 {
 }
 
-unsigned int CopyPageIndexTable(void)
+unsigned int CopyPageIndexTable(int is_clear_user_space)
 {
     DisableSwitchTask();
     unsigned int eflags = GetEFLAGS();
@@ -218,7 +349,10 @@ unsigned int CopyPageIndexTable(void)
     temp = 0xFFFFF000;
     for (int i = 0; i < 1022; ++i)
     {
-        *(unsigned int *)new_page_index_table_addr = *(unsigned int *)temp;
+        if (is_clear_user_space&&i<512)
+            *(unsigned int *)new_page_index_table_addr=0;
+        else
+            *(unsigned int *)new_page_index_table_addr = *(unsigned int *)temp;
         temp += 4, new_page_index_table_addr += 4;
     }
     /*将新页目录表的最后一项更新为自身的地址，倒数第二项清空*/
@@ -228,7 +362,7 @@ unsigned int CopyPageIndexTable(void)
     /*将当前页目录表倒数第二项重新清零*/
     *(unsigned int *)temp = 0;
     /*重置当前页目录的用户空间*/
-    ResetUserNowPageIndexTable();
+    //ResetUserNowPageIndexTable();
     SetEFLAGS(eflags);
     return phypage_addr;
 }
@@ -334,6 +468,23 @@ void SetKernelPageIndexTable(unsigned int *index_table_v_addr)
 }
 
 void ResetUserNowPageIndexTable(void)
+{
+    /*
+    for (int i = 0; i < 512; ++i)
+    {
+        GetKernelPageIndexTable()[i] = 0;
+    }
+    */
+    unsigned int temp = 0xFFFFF000;
+    for (int i = 0; i < 512; ++i)
+    {
+        *(unsigned int *)temp=0;
+        temp += 4;
+    }
+    FlushCR3();
+}
+
+void ResetKernelUserSpace(void)
 {
     for (int i = 0; i < 512; ++i)
     {

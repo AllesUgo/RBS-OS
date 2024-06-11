@@ -82,7 +82,7 @@ void InitKernelTask()
     ptr->next = ptr;
     ptr->next_allocate = 0x80201000;
     ptr->task_id = 0;
-    ptr->extra_info=&(ptr->_extra);
+    //ptr->extra_info=&(ptr->_extra);
     ptr->task_state = 1;
     {
         char str[] = "kernel";
@@ -109,7 +109,7 @@ void InitKernelTask()
     unsigned short int seg = InstallGDT(MakeSegmentDescriptor((void *)TSS_ADDR, 103, 0x89), &reg);
     FlashGDT(&reg);
     // WaitForInterrupt();
-    asm volatile(
+    __asm__ volatile(
         "ltr %%ax\n\t"
         :
         : "a"(seg));
@@ -120,6 +120,7 @@ void InitKernelTask()
 
 void switch_task(void)
 {
+    CloseInterrupt();//本函数调用一定从中断中引发，从中断返回时可还原eflags，无需备份状态
     time_counter+=1;
     if (!IS_SWITCH_TASK_ENABLE) return;
     struct TASK_INFO_BLOCK *tb = GetNowTaskInfoPtr();
@@ -317,10 +318,12 @@ int ReadProgram(char *buffer, unsigned int buffer_size, unsigned int sector)
 //创建进程，指定进程所在扇区、权限等级及进程附加到的session
 int LoadTask(int sector, int dpl,struct Session* session)
 {
+    unsigned int eflags;
     // 获取目标程序大小
     int program_size = ReadProgramSize(sector);
-
-    if (program_size < 0)
+    Session_PutString(session,"Program size:");
+    Session_PrintNumber(session,program_size,10);
+    if (program_size <= 0)
         return -1;
     // 为该程序创建基本信息
     struct TASK_INFO_BLOCK *tb = (struct TASK_INFO_BLOCK *)kmalloc(sizeof(struct TASK_INFO_BLOCK) + 30);
@@ -330,23 +333,45 @@ int LoadTask(int sector, int dpl,struct Session* session)
     ((struct TASK_EXTRA_INFO*)tb->extra_info)->session = session;
     //((struct TASK_EXTRA_INFO*)tb->extra_info)->
     /*将页目录表低512位清零*/
+    /*
     unsigned int *now_page_index_table_ptr = (unsigned int *)0xFFFFF000;
     for (int i = 0; i < 512; ++i)
         now_page_index_table_ptr[i] = 0;
-
-    // 为程序申请内存
+    */
+    //备份当前进程的CR3
+    int now_cr3;
+    __asm__ volatile (
+        "movl %%cr3,%%eax\n\t"
+        :"=a"(now_cr3)
+        :
+    );
+    // 为新进程创建页表
+    int cr3 = CopyPageIndexTable(0);
+    eflags = GetEFLAGS();
+    CloseInterrupt();//在此期间不允许任务切换
+    //将当前页目录切换到新的进程
+    __asm__ volatile (
+        "movl %%eax,%%cr3\n\t"
+        :
+        :"a"(cr3)
+    );
+    //将页目录用户空间除0级栈以外的内容清空
+    unsigned int temp = 0xFFFFF000;
+    for (int i = 0; i < 511; ++i)
+    {
+        *(unsigned int *)temp=0;
+        temp += 4;
+    }
+    FlushCR3();
+    // 为程序申请除0级栈以外内存,程序代码段和用户栈在低地址空间，0级栈在用户空间顶端
     int i, k;
     for (i = 0; i < (program_size - 1) / 4096 + 1; ++i)
     {
         AllocatePage(i * 4096, 0x05); // 只读部分
     }
     ReadProgram((char *)0x00, i * 4096, sector); // 读取程序本身
-    for (k = 0; k < 256; ++k)
-    {
-        AllocatePage((i++) * 4096, 0x03); // 分配0级栈
-    }
-    // 设置esp0
-    tb->esp0 = i * 4096;
+    // 设置esp0，该值为定值，分配内存将在CR3切换回原本进程后进行
+    tb->esp0 = 0x80000000;
     for (k = 0; k < 256; ++k)
     {
         AllocatePage((i++) * 4096, 0x07); // 分配3级栈
@@ -355,7 +380,24 @@ int LoadTask(int sector, int dpl,struct Session* session)
     tb->next_allocate = tb->esp;
     tb->task_id = AllocateTaskID(); /*为用户程序申请ID*/
     /*拷贝页目录给用户*/
-    tb->cr3 = CopyPageIndexTable();
+    tb->cr3 = cr3;
+    //切换回原本的CR3
+    __asm__ volatile (
+        "movl %%eax,%%cr3\n\t"
+        :
+        :"a"(now_cr3)
+    );
+    //将目标进程的0级栈清空
+    ResetTargetIndexTableItem(cr3,511);
+    //为目标进程分配0级栈
+    unsigned int end = 0x7ff00000;//0级栈最后一个页地址，是第524,287个页（0开始计数）
+    for (k = 0; k < 256; ++k)
+    {
+        AllocatePageInOtherProcress(end, 0x03,cr3); // 分配0级栈
+        end+=4096;
+    }
+    //恢复中断状态
+    SetEFLAGS(eflags);
     /*设置用户初始状态信息*/
     tb->cs = 0x1B;
     tb->ds = 0x23;
@@ -368,7 +410,7 @@ int LoadTask(int sector, int dpl,struct Session* session)
     tb->task_state = 0;
     /*将任务加入任务链，先关闭中断*/
     DisableSwitchTask();
-    unsigned int eflags = GetEFLAGS();
+    eflags = GetEFLAGS();
     tb->EFLAGS = eflags; /*新任务初始eflags状态继承自内核任务*/
     CloseInterrupt();
     struct TASK_INFO_BLOCK *head = GetNowTaskInfoPtr();
@@ -376,6 +418,7 @@ int LoadTask(int sector, int dpl,struct Session* session)
     head->next = tb;
     Session_AttachTask(session,tb->task_id);
     SetEFLAGS(eflags);
+    Session_PutString(session,"New process created\r\n");
     RecoverSwitchTask();
 }
 
@@ -438,6 +481,7 @@ void CleanTask(unsigned int task_id)
             /*无需考虑只有一个任务的情况，因为内核任务必然存在且不可被清理*/
             break;
         }
+        temp=temp->next;
     } while (temp != GetNowTaskInfoPtr());
     RecoverSwitchTask();
     SetEFLAGS(eflage);
@@ -495,10 +539,7 @@ void CloseNowTask(void)
     /*恢复中断并进入死循环等待被回收*/
     RecoverSwitchTask();
     SetEFLAGS(eflage);
-    while (1)
-    {
-        WaitForInterrupt();
-    }
+    SwitchToNextTask();
 }
 
 int PauseTask(unsigned int task_id)
@@ -614,4 +655,13 @@ int WaitForKeyboardInput()
 void SwitchToNextTask()
 {
     __asm__ volatile ("int $0x70");
+}
+
+
+int GetTaskNumber()
+{
+    struct TASK_INFO_BLOCK* p = (struct TASK_INFO_BLOCK*)NOW_TASK_ADDR->next;
+    int i=1;
+    while (p!=NOW_TASK_ADDR) ++i;
+    return i;
 }

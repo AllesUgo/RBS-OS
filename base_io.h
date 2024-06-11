@@ -10,5 +10,6 @@ void WritePort(unsigned short int port, unsigned char data);
 void WaitForInterrupt();
 void ReadSector(void *buffer, unsigned int sector_id, unsigned char need_num);
 void FlushCR3(void);
+void CloseCPU();
 
 #endif

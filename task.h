@@ -41,4 +41,6 @@ void WakeUpTask(unsigned int task_id);
 
 int WaitForKeyboardInput();
 void SwitchToNextTask();
+//统计当前任务个数，本函数不保证进程安全
+int GetTaskNumber();
 

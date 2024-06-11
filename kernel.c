@@ -106,7 +106,7 @@ void rbsmain()
     mmap(KERNEL_PAGE_INDEX_TABLE_V_ADDR,KERNEL_PAGE_INDEX_TABLE_PHY_ADDR,0x03);
     SetKernelPageIndexTable((unsigned int*)KERNEL_PAGE_INDEX_TABLE_V_ADDR);
     //清空内核低2G的页表
-    ResetUserNowPageIndexTable();
+    ResetKernelUserSpace();
     char str5[512];
     Puts("Now test disk reader...\r\n");
     ReadSector(str5, 20, 1);
@@ -120,15 +120,6 @@ void rbsmain()
         Puts(str);
     }
     //LoadTask(100, 3);
-    {
-        char str[] = "Test soft interrupt OKYA\r\n";
-        asm volatile(
-                "xor %%edi,%%edi\n\t"
-                "int $0x66\n\t"
-                :
-                : "b"(str));
-
-    }
     {
         /*显示CPU信息*/
         unsigned int eflages=GetEFLAGS();
@@ -153,8 +144,8 @@ void rbsmain()
     Puts("Session Switched\r\nPress keyboard to input\r\n");
     //LoadTask(66, 3,session);
     Session_PutString(session,"Kernel finished\r\n");
-    int key = WaitForKeyboardInput();
-    Session_PrintNumber(session,key,10);
+    //Session_PrintNumber(session,(int)Session_PrintNumber,16);
+    LoadTask(100,3,session);
     while (1)
     {
         WaitForInterrupt();

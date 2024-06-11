@@ -82,6 +82,7 @@ void Session_Putchar(struct Session *session, char ch, unsigned char attribute)
 
 void Session_SetCursor(struct Session *session, short int x, short int y)
 {
+    if (x<0||x>80||y<0||y>25) return;
     session->cursor_x = x;
     session->cursor_y = y;
     if (ATTACHED_SESSION == session)

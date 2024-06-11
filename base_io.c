@@ -89,4 +89,8 @@ void FlushCR3(void)
       :
       :);
 }
+void CloseCPU()
+{
+  __asm__ volatile("cli;hlt;");
+}
 
