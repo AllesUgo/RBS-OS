@@ -1,0 +1,23 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"base_type.h": "c",
+			"task.h": "c",
+			"c_basic.h": "c",
+			"task_basic_info.h": "c",
+			"screen_ctrl.h": "c",
+			"interrupt.h": "c",
+			"memory.h": "c",
+			"session.h": "c",
+			"base_io.h": "c",
+			"keybord.h": "c",
+			"basic_info.h": "c",
+			"time.h": "c"
+		}
+	}
+}
