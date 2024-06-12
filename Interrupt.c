@@ -100,6 +100,12 @@ void __cdecl deal_soft_interrupt(unsigned int num, unsigned int b, unsigned int 
         }
     }
     break;
+    case 9:
+        *(void**)b = TaskHeapUp(c);
+        break;
+    case 10:
+        TaskHeapDown(c);
+        break;
     default:
         Puts("Unknown soft interrupt:");
         PrintHex(num);
@@ -214,6 +220,11 @@ __attribute__((interrupt)) void int14(struct interrupt_frame *frame, unsigned in
     Strcat(str, UIntToHex(lineraddr, temp));
     Strcat(str, "\r\n");
     Puts(str);
+    if (GetNowTaskInfoPtr()->task_id==0)
+    {
+        Puts("Kernel crashed!\r\n");
+        CloseCPU();
+    }
     Puts("Press any key to continue with close now process...\r\n");
     SetEFLAGS(frame->eflags);
     WaitForKeyboardInput();
