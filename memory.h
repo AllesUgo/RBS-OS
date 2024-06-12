@@ -14,7 +14,10 @@ void ResetKernelUserSpace(void);
 void FreePage(unsigned int page);
 
 void *kmalloc(unsigned int size);
-void* malloc(unsigned int size);
+//将堆向上拓展size字节(向上对其到整数页)
+void* heapup(unsigned int size);
+//将堆向下缩小size字节(对齐到整数页，例如参数1字节也会实际缩小4096字节)
+void heapdown(unsigned int size);
 
 void kfree(void *ptr);
 
@@ -30,3 +33,11 @@ void SetKernelPageIndexTable(unsigned int* index_table_v_addr);
 void ResetUserNowPageIndexTable(void);
 void AsyncNowKernelSpaceIndexTableToKernelSpace(void);
 void AsyncKernelSpaceIndexTableToNowKernelSpace(void);
+
+void* kheapup(unsigned int size);
+void kheapdown(unsigned int size);
+
+void kmalloc_init(unsigned int max_size);
+
+
+

@@ -8,6 +8,12 @@
 
 #define PALIGN_UP(x, _al) ((x + (_al - 1)) & ~(_al - 1))
 static unsigned int *KERNEL_PAGE_INDEX_TABLE_ADDR;
+static unsigned int NEXT_ALLOCATE = 0x80202000;
+static struct KERNEL_MALLOC_INFO {
+    unsigned int start_vaddr;
+    unsigned int map_size_byte;
+    char* map;
+} KMALLOC_INFO={0,0,0};
 
 void InitPhyPageTable(void)
 {
@@ -279,8 +285,7 @@ void FreePage(unsigned int page)
     if ((*(unsigned int *)temp) & 1)
     {
         // 页目录中存在此页表
-        temp = page & 0xFFC00000;
-        temp |= ((0x3FF000) | ((page & 0x3FFF000) >> 10));
+        temp = (0xFFC00000|(page>>12<<2));
         if ((*(unsigned int *)temp) & 1)
         {
             // 物理页存在
@@ -290,30 +295,97 @@ void FreePage(unsigned int page)
             *ptr = 0;
 
             asm volatile(
-                "push %%eax\n\t"
-                "mov %%cr3,%%eax\n\t"
-                "mov %%eax,%%cr3\n\t"
-                "pop %%eax\n\t"
-                :
-                :);
+            "invlpg (%%ebx)\n\t"
+            :
+            :"b"(page)
+            );
         }
     }
 }
 void *kmalloc(unsigned int size)
 {
-    static unsigned int next_allocate = 0x80202000;
-    unsigned int ret = next_allocate;
-    unsigned int page_num = PALIGN_UP(size, 0x1000) / 0x1000;
+	size += sizeof(unsigned int);
+    int eflags = GetEFLAGS();
+    CloseInterrupt();
+    size = PALIGN_UP(size,4096);
+    unsigned int page_num = size/4096;
+    //开始寻找空闲页
+    for (int i=0;i<KMALLOC_INFO.map_size_byte;++i)
+    {
+        if (KMALLOC_INFO.map[i]!=0xFF)
+        {
+            //这一页中存在空闲空间
+            //检查连续空闲位是否充足
+			for (int j = 0; j < 8; ++j)
+			{
+				if ((KMALLOC_INFO.map[i] & (1 << j)) == 0)
+				{
+					//这一位是空闲的
+					int k = i * 8 + j;
+					int count = 0;
+					for (int l = k; l < KMALLOC_INFO.map_size_byte * 8; ++l)
+					{
+						if ((KMALLOC_INFO.map[l / 8] & (1 << (l % 8))) == 0)
+						{
+							count++;
+							if (count == page_num)
+							{
+								//找到了连续的空闲页
+                                char* ptr = (char*)(KMALLOC_INFO.start_vaddr + k * 4096);
+                                char* ret = ptr;
+								for (int m = k; m < k + count; ++m)
+								{
+									KMALLOC_INFO.map[m / 8] |= (1 << (m % 8));
+									AllocatePage((unsigned int)ptr, 0x03);
+									ptr += 4096;
+								}
+								SetEFLAGS(eflags);
+								*(unsigned int*)ret = size;
+								return (void*)(ret+sizeof(unsigned int));
+							}
+						}
+						else
+						{
+							count = 0;
+						}
+					}
+				}
+			}
+        }
+    }
+    SetEFLAGS(eflags);
+}
 
+void* kheapup(unsigned int size)
+{
+    int eflags = GetEFLAGS();
+    CloseInterrupt();
+    NEXT_ALLOCATE;
+    unsigned int ret = NEXT_ALLOCATE;
+    unsigned int page_num = PALIGN_UP(size, 0x1000) / 0x1000;
     while (page_num--)
     {
-        AllocatePage(next_allocate, 0x03);
-        next_allocate += 0x1000;
+        AllocatePage(NEXT_ALLOCATE, 0x03);
+        NEXT_ALLOCATE += 0x1000;
     }
+    SetEFLAGS(eflags);
     return (void *)ret;
 }
 
-void *malloc(unsigned int size)
+void kheapdown(unsigned int size)
+{
+    unsigned int eflags = GetEFLAGS();
+    CloseInterrupt();
+    unsigned int page_num = PALIGN_UP(size, 0x1000) / 0x1000;
+    while (page_num--)
+    {
+        NEXT_ALLOCATE -= 0x1000;
+        FreePage(NEXT_ALLOCATE);
+    }
+    SetEFLAGS(eflags);
+}
+
+void *heapup(unsigned int size)
 {
     struct TASK_INFO_BLOCK *tb = GetNowTaskInfoPtr();
     unsigned int ret = tb->next_allocate;
@@ -321,14 +393,46 @@ void *malloc(unsigned int size)
 
     while (page_num--)
     {
-        AllocatePage(tb->next_allocate, 0x03);
+        AllocatePage(tb->next_allocate, 0x07);
         tb->next_allocate += 0x1000;
     }
     return (void *)ret;
 }
 
+void heapdown(unsigned int size)
+{
+    struct TASK_INFO_BLOCK *tb = GetNowTaskInfoPtr();
+    unsigned int ret = tb->next_allocate;
+    unsigned int page_num = PALIGN_UP(size, 0x1000) / 0x1000;
+    while (page_num--)
+    {
+        tb->next_allocate -= 0x1000;
+        FreePage(tb->next_allocate);
+    }
+}
+
 void kfree(void *ptr)
 {
+    unsigned int row;
+	unsigned int eflags = GetEFLAGS();
+	CloseInterrupt();
+	unsigned int page = (unsigned int)ptr;
+	page -= sizeof(unsigned int);
+    row = page;
+    if (page % 4096 != 0) CloseCPU();
+	unsigned int free_size = *(unsigned int*)page;
+    page -= KMALLOC_INFO.start_vaddr;
+	page /= 4096;
+    free_size /= 4096;
+	//从位图中释放
+	for (int i = 0; i < free_size; ++i)
+	{
+		KMALLOC_INFO.map[page + i] &= ~(1 << (page % 8));
+		FreePage(row);
+        row += 4096;
+        //__asm__ volatile ("xchg %bx,%bx");
+	}
+	SetEFLAGS(eflags);
 }
 
 unsigned int CopyPageIndexTable(int is_clear_user_space)
@@ -521,4 +625,16 @@ void AsyncKernelSpaceIndexTableToNowKernelSpace(void)
         p[i] = k[i];
     }
     SetEFLAGS(eflag);
+}
+//初始化内核malloc,调用本函数后请勿手动使用kheap相关函数
+void kmalloc_init(unsigned int max_size)
+{
+    if (max_size>(unsigned int)1024*1024*1024) CloseCPU();
+    //计算需要的位图大小
+    unsigned int map_size = (max_size/4096)/8;
+    KMALLOC_INFO.map_size_byte = map_size;
+    KMALLOC_INFO.map = kheapup(map_size);
+    KMALLOC_INFO.start_vaddr = (unsigned int)kheapup(1);
+    kheapdown(1);
+    for (int i=0;i<map_size;++i) KMALLOC_INFO.map[i]=0;
 }

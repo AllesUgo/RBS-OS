@@ -96,7 +96,8 @@ void rbsmain()
 
     FlashInterrupt(&reg);
     Puts("Flash interrupt vector table OKYA\r\n");
-    
+    kmalloc_init(1024*1024*1024);
+    Puts("Init kernel malloc info\r\n");
     EnableTimeInterrupt();
     EnableKeybordInterrupt();
     Init8259A();
@@ -115,7 +116,15 @@ void rbsmain()
         char *temp = (char *)kmalloc(1024 * 1024);
         *temp = 'A';
         *(temp + 4096) = 'S';
-        //kfree(temp);
+        //kheapdown(temp);
+        kfree(temp);
+        char* p = (char*)kmalloc(1024*1023);
+        if (p!=temp)
+        {
+            Puts("Memory test error!\r\n");
+            CloseCPU();
+        }
+        kfree(p);
         char str[] = "TestMemoryOK\r\n";
         Puts(str);
     }

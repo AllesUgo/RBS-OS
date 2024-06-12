@@ -44,3 +44,6 @@ void SwitchToNextTask();
 //统计当前任务个数，本函数不保证进程安全
 int GetTaskNumber();
 
+void* TaskHeapUp(unsigned int size);
+void TaskHeapDown(unsigned int size);
+

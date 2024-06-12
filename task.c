@@ -367,16 +367,16 @@ int LoadTask(int sector, int dpl,struct Session* session)
     int i, k;
     for (i = 0; i < (program_size - 1) / 4096 + 1; ++i)
     {
-        AllocatePage(i * 4096, 0x05); // 只读部分
+        AllocatePage((i+1) * 4096, 0x05); // 只读部分
     }
-    ReadProgram((char *)0x00, i * 4096, sector); // 读取程序本身
+    ReadProgram((char *)0x1000, i * 4096, sector); // 读取程序本身
     // 设置esp0，该值为定值，分配内存将在CR3切换回原本进程后进行
     tb->esp0 = 0x80000000;
     for (k = 0; k < 256; ++k)
     {
-        AllocatePage((i++) * 4096, 0x07); // 分配3级栈
+        AllocatePage((1+i++) * 4096, 0x07); // 分配3级栈
     }
-    tb->esp = i * 4096;
+    tb->esp = (i+1) * 4096;
     tb->next_allocate = tb->esp;
     tb->task_id = AllocateTaskID(); /*为用户程序申请ID*/
     /*拷贝页目录给用户*/
@@ -406,7 +406,7 @@ int LoadTask(int sector, int dpl,struct Session* session)
     tb->gs = 0x23;
     tb->ss = 0x23;
     Strcpy(tb->task_name, "User program");
-    tb->eip = 0; /*用户程序起始执行位置*/
+    tb->eip = 0x1000; /*用户程序起始执行位置*/
     tb->task_state = 0;
     /*将任务加入任务链，先关闭中断*/
     DisableSwitchTask();
@@ -664,4 +664,14 @@ int GetTaskNumber()
     int i=1;
     while (p!=NOW_TASK_ADDR) ++i;
     return i;
+}
+
+void* TaskHeapUp(unsigned int size)
+{
+    return heapup(size);
+}
+
+void TaskHeapDown(unsigned int size)
+{
+    return heapdown(size);
 }
